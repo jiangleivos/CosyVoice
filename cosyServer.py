@@ -7,6 +7,7 @@ from urllib.parse import quote
 # 其他代码保持不变，保持原有结构
 from cosyvoice.cli.cosyvoice import CosyVoice, CosyVoice2
 from cosyvoice.utils.file_utils import load_wav
+import torchaudio.functional as F  # 新增导入
 
 sys.path.append('third_party/Matcha-TTS')
 torchaudio.set_audio_backend("sox_io")
@@ -18,12 +19,14 @@ tempMap = {
     'nan2_16k':'asset/cuishou_nan2_16k.wav',
     'nv_16k':'asset/cuishou_nv2_16k.wav',
     'nv2_16k':'asset/cuishou_nv2_16k.wav',
+    'jiuge_nv_16k':'asset/8616066708_16k_2.wav',
 }
 promptMap = {
     'nv2_16k':'哦，您这边是忘记处理了是吧？那您这个一会儿是自己登录平台处理，还是说我们这边帮您划扣啊？奥，那您这边看好时间好吧？中午11点钟之前处理好哈，先生！',
     'nv_16k':'哦，您这边是忘记处理了是吧？那您这个一会儿是自己登录平台处理，还是说我们这边帮您划扣啊？奥，那您这边看好时间好吧？中午11点钟之前处理好哈，先生！',
     'nan2_16k':'你是不是无所谓嘛，我叫你尽快发一下，浪费你两分钟的时间，你这个连两分钟你都你都不愿意是吧？你非得我们这边走流程！那你那你发。。。那你刚你那两分钟你在干嘛呢? 我问你!',
-    'nan_16k':'你是不是无所谓嘛，我叫你尽快发一下，浪费你两分钟的时间，你这个连两分钟你都你都不愿意是吧？你非得我们这边走流程！那你那你发。。。那你刚你那两分钟你在干嘛呢? 我问你!'
+    'nan_16k':'你是不是无所谓嘛，我叫你尽快发一下，浪费你两分钟的时间，你这个连两分钟你都你都不愿意是吧？你非得我们这边走流程！那你那你发。。。那你刚你那两分钟你在干嘛呢? 我问你!',
+    'jiuge_nv_16k':'由于您现在已经进⼊逾期状态，为了避免产⽣不良记录，请您在两⼩时内还清款项，我们也会持续与您保持联系，感谢您的接听，再见。现在需要您⻢上处理⼀下这笔⽋款',
 }
 cosyvoice = None
 prompt_speech = None
@@ -33,11 +36,12 @@ last_prompt_name = 'default'
 def initialize():
     global prompt_speech
     global cosyvoice
-    cosyvoice = CosyVoice2(model_name, load_jit=False, load_trt=False, fp16=False )
+    cosyvoice = CosyVoice2(model_name, load_jit=False, load_trt=False, fp16=False)
     # assert cosyvoice.sample_rate == target_sr, "采样率不匹配"
     # 验证torchaudio支持的编码
-    print(cosyvoice.sample_rate)
-    print(torchaudio.get_audio_backend())  # 应输出'sox_io'
+    print('cosyvoice.sample_rate',cosyvoice.sample_rate)
+    # assert cosyvoice.sample_rate in [16000], "模型采样率异常"
+    print('torchaudio.get_audio_backend()',torchaudio.get_audio_backend())  # 应输出'sox_io'
 
     prompt_speech = load_prompt('default')  # 示例初始化操作
 def load_prompt(prompt_name='default'):
@@ -74,12 +78,20 @@ def stream_audio(text_input, prompt, prompt_audio):
     prompt_speech_16k = prompt_audio
     # 修改循环解包方式（关键点）
     for j in cosyvoice.inference_zero_shot(
-        text_input, prompt, prompt_speech_16k, stream=True, speed=0.95, text_frontend=True
+        text_input, prompt, prompt_speech_16k, stream=False, speed=1.1, text_frontend=True
     ):
         audio_tensors.append(j['tts_speech'])  # 直接访问字典
     
     combined_audio = torch.cat(audio_tensors, dim=-1)
+    # 强制重采样到16000
+    # if cosyvoice.sample_rate != target_sr:
+    #     combined_audio = F.resample(
+    #         combined_audio,
+    #         orig_freq=cosyvoice.sample_rate,
+    #         new_freq=target_sr
+    # )
     byte_io = io.BytesIO()
+    print('combined_audio.shape',combined_audio.shape)
     torchaudio.save(byte_io, combined_audio, cosyvoice.sample_rate, format="wav")
     return byte_io.getvalue()
 
@@ -110,8 +122,8 @@ def tts_stream():
         
     prompt_speech = load_prompt(prompt_name)
         
-    print(text)
-    print(prompt)
+    print('text->',text)
+    print('prompt->',prompt)
     audio_bytes = stream_audio(text, prompt,prompt_speech)  # 修正参数传递
     def generate_audio_stream(text, prompt, prompt_speech):
         for audio_chunk in stream_audio(text, prompt, prompt_speech):
