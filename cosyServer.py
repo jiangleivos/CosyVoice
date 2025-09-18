@@ -1,5 +1,6 @@
 import sys
 import io
+import os
 import torch # type: ignore
 import torchaudio # type: ignore
 from flask import Flask, request, Response ,jsonify # type: ignore
@@ -7,7 +8,8 @@ from urllib.parse import quote
 # 其他代码保持不变，保持原有结构
 from cosyvoice.cli.cosyvoice import CosyVoice, CosyVoice2
 from cosyvoice.utils.file_utils import load_wav
-import torchaudio.functional as F  # 新增导入
+# import torchaudio.functional as F  # 新增导入
+
 
 sys.path.append('third_party/Matcha-TTS')
 torchaudio.set_audio_backend("sox_io")
@@ -20,17 +22,29 @@ tempMap = {
     'nv_16k':'asset/cuishou_nv2_16k.wav',
     'nv2_16k':'asset/cuishou_nv2_16k.wav',
     'jiuge_nv_16k':'asset/8616066708_16k_2.wav',
+    'yuanlv_nv_16k':'asset/yuanlv_nv_16k_01.wav',
+    'jiuge_nv_16k_02':'asset/jiuge_nv_16k_02.wav',
+    'yizhi_bx_nv':'asset/yizhi_bx_nv_02.wav'
+}
+speedmap = {
+    'yuanlv_nv_16k':1,
+    'jiuge_nv_16k_02':1,
+    'yizhi_bx_nv':1.1
 }
 promptMap = {
     'nv2_16k':'哦，您这边是忘记处理了是吧？那您这个一会儿是自己登录平台处理，还是说我们这边帮您划扣啊？奥，那您这边看好时间好吧？中午11点钟之前处理好哈，先生！',
     'nv_16k':'哦，您这边是忘记处理了是吧？那您这个一会儿是自己登录平台处理，还是说我们这边帮您划扣啊？奥，那您这边看好时间好吧？中午11点钟之前处理好哈，先生！',
     'nan2_16k':'你是不是无所谓嘛，我叫你尽快发一下，浪费你两分钟的时间，你这个连两分钟你都你都不愿意是吧？你非得我们这边走流程！那你那你发。。。那你刚你那两分钟你在干嘛呢? 我问你!',
     'nan_16k':'你是不是无所谓嘛，我叫你尽快发一下，浪费你两分钟的时间，你这个连两分钟你都你都不愿意是吧？你非得我们这边走流程！那你那你发。。。那你刚你那两分钟你在干嘛呢? 我问你!',
-    'jiuge_nv_16k':'由于您现在已经进⼊逾期状态，为了避免产⽣不良记录，请您在两⼩时内还清款项，我们也会持续与您保持联系，感谢您的接听，再见。现在需要您⻢上处理⼀下这笔⽋款',
+    'jiuge_nv_16k':'由于您现在已经进⼊逾期状态，为了避免产⽣不良记录，请您在两个⼩时内还清款项，我们也会持续和您保持联系的，感谢您的接听，再见。现在需要您⻢上处理⼀下这笔⽋款!',
+    'yuanlv_nv_16k':'哎您好，打扰到您了，上次联系您的时候您的电话显示正忙哈，是这样子的，您的医社保之外做补充报销的资格是快要到期了，那您这边没有激活的话，以后生病住院责任内是没有办法申请报销的哈，您先不要挂电话，我再带您确认一下，好吧?',
+    'jiuge_nv_16k_02':'诶您好。诶这里是专注家装20年的装修平台，额近期我们推出了免费量房、先装修后付款的活动，而且提供全程质检等服务，呵，装修品质有保障。',
+    'yizhi_bx_nv':'嗯来电就是提醒您投宝领取一份医疗补充金,额稍后收到短信之后呢,直接确认免费领取就可以了。'
 }
 cosyvoice = None
 prompt_speech = None
 model_name = 'iic/CosyVoice2-0.5B'
+# model_name = '/home/jianglei/work/ts/CosyVoice/iic/CosyVoice2-0.5B'
 target_sr = 16000
 last_prompt_name = 'default'
 def initialize():
@@ -52,7 +66,13 @@ def load_prompt(prompt_name='default'):
     last_prompt_name = prompt_name
     if prompt_name in tempMap:
         print(__name__,'prompt_name,tempMap[prompt_name]',prompt_name,tempMap[prompt_name])
-        prompt_speech = load_wav(tempMap[prompt_name],target_sr)
+        file_path = tempMap[prompt_name]
+        current_dir = os.getcwd()
+        if not os.path.exists(file_path):
+            error_msg = f"提示音频文件不存在: {file_path},当前文件夹为: {current_dir}"
+            print(error_msg)
+            raise FileNotFoundError(error_msg) 
+        prompt_speech = load_wav(file_path,target_sr)
         return prompt_speech
     else:
         raise ValueError(f"Prompt '{prompt_name}' not found.")
@@ -73,12 +93,12 @@ def load_prompt(prompt_name='default'):
 "[lipsmack]", 咂嘴
 "[mn]"
 '''
-def stream_audio(text_input, prompt, prompt_audio):
+def stream_audio(text_input, prompt, prompt_audio,speed):
     audio_tensors = []
     prompt_speech_16k = prompt_audio
     # 修改循环解包方式（关键点）
     for j in cosyvoice.inference_zero_shot(
-        text_input, prompt, prompt_speech_16k, stream=False, speed=1.1, text_frontend=True
+        text_input, prompt, prompt_speech_16k, stream=False, speed=speed, text_frontend=True
     ):
         audio_tensors.append(j['tts_speech'])  # 直接访问字典
     
@@ -107,6 +127,22 @@ def stream_audio(text_input, prompt, prompt_audio):
 #     return b"".join(audio_segments)  # 合并所有音频片段
 
 
+def check_gpu():
+    if not torch.cuda.is_available():
+        return False
+    try:
+        # 尝试分配显存（10MB）
+        torch.ones((16, 16), device='cuda')
+        return True
+    except:
+        return False
+@app.route('/health')
+def health_check():
+    gpu_available=check_gpu()
+    if(gpu_available):
+        return jsonify(status="OK", msg=gpu_available),200 
+    else:
+        return jsonify(status="Error", message="GPU不可用"), 500
 @app.route('/tts_stream')
 def tts_stream():
     # try:
@@ -122,12 +158,14 @@ def tts_stream():
         
     prompt_speech = load_prompt(prompt_name)
         
+    speed = speedmap.get(prompt_name,1.1)
     print('text->',text)
     print('prompt->',prompt)
-    audio_bytes = stream_audio(text, prompt,prompt_speech)  # 修正参数传递
-    def generate_audio_stream(text, prompt, prompt_speech):
-        for audio_chunk in stream_audio(text, prompt, prompt_speech):
-            yield audio_chunk
+    print('speed->',speed)
+    audio_bytes = stream_audio(text, prompt,prompt_speech,speed)  # 修正参数传递
+    # def generate_audio_stream(text, prompt, prompt_speech):
+    #     for audio_chunk in stream_audio(text, prompt, prompt_speech):
+    #         yield audio_chunk
         
     return Response(
         audio_bytes,
@@ -146,3 +184,7 @@ if __name__ == '__main__':
     initialize()
     port = sys.argv[1] if len(sys.argv) >= 2 else 5001
     app.run(host='0.0.0.0',port=port,threaded=True)
+
+if not hasattr(app, 'cosyvoice_initialized'):  # 防止重复初始化
+    initialize()
+    app.cosyvoice_initialized = True

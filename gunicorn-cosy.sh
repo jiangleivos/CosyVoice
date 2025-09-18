@@ -1,0 +1,2 @@
+# /home/jianglei/miniconda3/envs/cosyvoice/bin/gunicorn --chdir /home/jianglei/miniconda3/envs/cosyvoice/bin  --timeout 120 --worker-class=gevent --workers=1 -w 4 -b 0.0.0.0:5001 -b 0.0.0.0:5002 -b 0.0.0.0:5003 -b 0.0.0.0:5004 cosyServer:app
+/home/jianglei/miniconda3/envs/cosyvoice/bin/gunicorn --chdir /home/jianglei/work/ts/CosyVoice  --timeout 120 --worker-class=gevent -w 1 -b 0.0.0.0:5001 -b 0.0.0.0:5002 -b 0.0.0.0:5003 -b 0.0.0.0:5004 cosyServer:app
