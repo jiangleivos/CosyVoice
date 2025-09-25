@@ -6,11 +6,8 @@ import { execFile, execFileSync, execSync } from 'child_process';
 // import { WaveFile } from 'wavefile'; // 引入 wavefile 库
 import pkg from 'wavefile';
 import Consul from './consul.mjs'; // 引入 Consul 类
+import { getConsulService, getConsulUrl } from './config.mjs'; // 引入配置加载函数
 const { WaveFile } = pkg;
-const DOMAIN = 'http://192.168.1.88';
-// const DOMAIN = 'http://frpc.ballge.cn';
-
-const CONSUL_SERVICE = 'cosy-service';
 
 class TTSClient {
   /**
@@ -236,13 +233,14 @@ class TTSClient {
     this.ports = ports;
     this.taskQueue = [];
     this.portQueue = [...ports]; // 初始化端口队列
-    this.consul_service = CONSUL_SERVICE;
+    // 注意：这里不再使用常量，而是在方法中动态加载配置
   }
   async getAvailableServices() {
     const fn = 'getAvailableServices->';
     try {
-      log(fn, 'this.consul_service', this.consul_service);
-      const services = await this.consul.getHealthyService(this.consul_service);
+      const consulService = await getConsulService();
+      log(fn, 'this.consul_service', consulService);
+      const services = await this.consul.getHealthyService(consulService);
       //乱序services
       services.sort(() => Math.random() - 0.5);
       log(fn, '可用服务:', services);
@@ -319,19 +317,36 @@ class TTSClient {
       throw new Error('所有TTS服务暂时没有多余并发');
     }
   }
-  // 修改后的 generateAudio 方法
+  // 修改后的 generateAudio 方法 - 使用Consul服务发现
   async generateAudio(text, prompt) {
     const fn = 'generateAudio';
-    while (this.portQueue.length > 0) {
-      const port = this.portQueue.shift();
-      const url = `${DOMAIN}:${port}/tts_stream`;
+
+    // 从Consul获取可用服务
+    let nodes = await this.getAvailableServices();
+    if (!nodes || nodes.length === 0) {
+      throw new Error('没有可用的TTS服务');
+    }
+
+    // 尝试每个可用的服务
+    for (let node of nodes) {
+      let { Address: addr, Port: port, Meta: meta, ID: id } = node.Service;
+
+      // 检查服务状态
+      if (meta && meta.status !== 'ready') {
+        log(fn, `跳过服务 ${id}, 状态: ${meta.status}`);
+        continue;
+      }
+
+      const url = `http://${addr}:${port}/tts_stream`;
 
       log(fn, 'new URLSearchParams({ text, prompt })', text, prompt);
       log(fn, '-->'.repeat(20), 'url', url);
+
       // 构造查询参数
       const params = new URLSearchParams({ text, prompt });
       const fullUrl = `${url}?${params}`;
       log(fn, 'fullUrl', fullUrl);
+
       try {
         // 使用 fetch 发送请求
         const response = await fetch(fullUrl, {
@@ -348,15 +363,12 @@ class TTSClient {
         // 获取二进制数据
         const data = await response.arrayBuffer();
         let buf = Buffer.from(data);
-        // fs.writeFileSync(outputPath, Buffer.from(data));
-        this.portQueue.push(port);
+        log(fn, `成功从服务 ${id} (${addr}:${port}) 获取音频, 大小: ${buf.length} 字节`);
         return buf;
-
-        // return true;
       } catch (error) {
-        console.error(`Port ${port} failed: ${error.message}`);
-        this.portQueue.push(port);
-        return null;
+        console.error(`服务 ${id} (${addr}:${port}) 失败: ${error.message}`);
+        // 继续尝试下一个服务
+        continue;
       }
     }
 

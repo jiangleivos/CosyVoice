@@ -5,14 +5,15 @@ import { log } from 'console';
 import fs from 'fs';
 import pkg from 'wavefile';
 import Consul from '../lib/consul.mjs';
+import { getConsulService } from '../lib/config.mjs';
 const { WaveFile } = pkg;
 const router = express.Router();
 const EXPIRE_TIME = 1 * 60 * 1000; //一分钟过期
-const CONSUL_SERVICE = 'cosy-service';
 let COSY_SERVICE_LAST_UPDATE = new Date().getTime();
 /* GET users listing. */
 router.get('/tts', async function (req, res, next) {
   const fn = 'api/tts->';
+  console.log(`${fn} 收到TTS请求:`, req.query);
   const ttsClient = new TTSClient();
   const consul = new Consul();
   const now = new Date().getTime();
@@ -27,18 +28,45 @@ router.get('/tts', async function (req, res, next) {
   );
   log(fn, 'now - COSY_SERVICE_LAST_UPDATE', now - COSY_SERVICE_LAST_UPDATE);
 
-  if (now - COSY_SERVICE_LAST_UPDATE > EXPIRE_TIME) {
-    log(fn, 'COSY_SERVICE_LAST_UPDATE 过期，重新初始化');
-    COSY_SERVICE_LAST_UPDATE = now;
-    try {
-      let serviceName = CONSUL_SERVICE;
-      await consul.refreshTTLCheckByServiceName(serviceName, Consul.status.pass);
-    } catch (error) {
-      console.error(fn, '获取检查项失败:', error);
+  // 检查服务健康状态并主动刷新
+  let shouldRefresh = now - COSY_SERVICE_LAST_UPDATE > EXPIRE_TIME;
+
+  if (shouldRefresh) {
+    log(fn, 'COSY_SERVICE_LAST_UPDATE 过期，主动刷新服务状态');
+  }
+
+  // 检查服务是否真的健康可用
+  try {
+    let serviceName = await getConsulService();
+    let isAvailable = await consul.isServiceAvailable(serviceName);
+
+    if (!isAvailable || shouldRefresh) {
+      log(fn, `服务不可用或需要刷新: 可用=${isAvailable}, 需刷新=${shouldRefresh}`);
+      COSY_SERVICE_LAST_UPDATE = now;
+
+      // 刷新TTL检查，最多重试3次
+      let refreshSuccess = false;
+      for (let retry = 0; retry < 3 && !refreshSuccess; retry++) {
+        try {
+          await consul.refreshTTLCheckByServiceName(serviceName, Consul.status.pass);
+          refreshSuccess = true;
+          log(fn, `服务状态刷新成功 (尝试 ${retry + 1}/3)`);
+        } catch (error) {
+          log(fn, `服务状态刷新失败 (尝试 ${retry + 1}/3):`, error.message);
+          if (retry < 2) await new Promise((resolve) => setTimeout(resolve, 1000)); // 等待1秒重试
+        }
+      }
+
+      if (!refreshSuccess) {
+        log(fn, '警告: 服务状态刷新失败，但继续尝试生成音频');
+      }
+    } else {
+      log(fn, 'COSY_SERVICE_LAST_UPDATE 未过期且服务可用，不需要刷新');
+      COSY_SERVICE_LAST_UPDATE = now;
     }
-  } else {
-    log(fn, 'COSY_SERVICE_LAST_UPDATE 未过期，不重新初始化');
-    COSY_SERVICE_LAST_UPDATE = now;
+  } catch (error) {
+    console.error(fn, '检查服务状态失败:', error.message);
+    // 即使检查失败，也尝试继续执行，让TTS客户端自己处理
   }
 
   let { text, prompt } = req.query;

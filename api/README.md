@@ -11,36 +11,42 @@
 ```json
 {
   "consul": {
-    "url": "http://192.168.1.88",
+    "url": "http://192.168.1.68",
     "service": "cosy-service-test"
+  },
+  "tts": {
+    "domain": "http://192.168.1.68"
   }
 }
 ```
 
-### 环境变量
+### 配置参数说明
 
-- `consul.url`: Consul Agent 的访问地址。API 服务器将通过此地址与 Consul 通信。
+- `consul.url`: Consul 服务器的地址，用于服务发现和健康检查。
+- `consul.service`: API 服务器要在 Consul 中查找的后端 TTS 服务的名称。
+- `tts.domain`: TTS 服务的基础域名地址。
 
-您也可以通过设置环境变量来覆盖默认配置：
-- `CONSUL_URL`: Consul Agent 地址
-- `CONSUL_SERVICE`: Consul 服务名
-- `TTS_DOMAIN`: TTS 服务域名
+### 快速切换方法
 
-示例：
+#### 方法一：使用配置切换工具（推荐）
+
 ```bash
-export CONSUL_URL=http://192.168.1.68
-export CONSUL_SERVICE=cosy-service-test
-export TTS_DOMAIN=http://192.168.1.68
+# 切换到测试环境
+node test/configTest.mjs switch test
+
+# 切换到生产环境
+node test/configTest.mjs switch prod
+
+# 验证当前配置
+node test/configTest.mjs verify
+
+# 测试配置加载功能
+node test/configTest.mjs test
 ```
--   `consul.service`: API 服务器要在 Consul 中查找的后端 TTS 服务的名称。
 
-### 切换步骤
+#### 方法二：手动修改配置文件
 
-1.  打开 `api/conf/config.json` 文件。
-2.  根据您的目标环境，修改 `url` 和 `service` 的值。
-3.  **重启 Node.js API 服务器** 以加载新的配置。
-
-**示例：切换到 `192.168.1.68` 的 `cosy-service-test` 环境**
+**切换到测试环境 (192.168.1.68)**
 
 将 `api/conf/config.json` 的内容修改为：
 
@@ -49,41 +55,65 @@ export TTS_DOMAIN=http://192.168.1.68
   "consul": {
     "url": "http://192.168.1.68",
     "service": "cosy-service-test"
+  },
+  "tts": {
+    "domain": "http://192.168.1.68"
   }
 }
 ```
 
----
+**切换到生产环境 (192.168.1.88)**
 
-**重要提示**: 每次修改完配置文件后，**必须重启 Node.js API 服务器** 才能使新的配置生效。
+将 `api/conf/config.json` 的内容修改为：
 
-## 手动使TTL检查过期
+```json
+{
+  "consul": {
+    "url": "http://192.168.1.88",
+    "service": "cosy-service"
+  },
+  "tts": {
+    "domain": "http://192.168.1.88"
+  }
+}
+```
 
-在测试环境中，可能需要手动使服务的TTL健康检查过期以验证系统的容错能力。以下是操作步骤：
+### 环境验证
 
-### 操作步骤
+配置切换后，可以使用以下脚本验证环境是否正常：
 
-1.  首先获取服务的检查ID：
-    ```bash
-    curl -s "http://192.168.1.68:8500/v1/health/checks/cosy-service-test" | jq '.[] | select(.ServiceID=="cosy-5090-service-1")'
-    ```
+```bash
+# 完整环境验证
+node test/testEnvironmentVerify.mjs
 
-2.  使用Consul API将检查状态设置为critical：
-    ```bash
-    curl -X PUT http://192.168.1.68:8500/v1/agent/check/fail/[检查ID]
-    ```
-    例如：
-    ```bash
-    curl -X PUT http://192.168.1.68:8500/v1/agent/check/fail/cosy-cp5090-ttl-1
-    ```
+# 网络连接测试
+node test/networkTest.mjs
 
-3.  验证检查状态是否已更新为critical：
-    ```bash
-    curl -s "http://192.168.1.68:8500/v1/health/checks/cosy-service-test" | jq '.[] | select(.ServiceID=="cosy-5090-service-1") | .Status'
-    ```
+# Consul服务诊断
+node test/consulDiagnostic.mjs
 
-### 注意事项
+# 简单TTS服务测试
+node test/simpleServiceTest.mjs
+```
 
-- 请确保将示例中的IP地址和检查ID替换为实际环境中的值
-- 此操作仅应用于测试环境，不应在生产环境中执行
-- 执行此操作后，相应的服务将被视为不健康，直到下一次成功的TTL更新
+### 重要说明
+
+1. **无需重启服务**：配置文件会在每次请求时动态加载，无需重启 Node.js 服务。
+2. **自动备份**：使用配置切换工具时会自动备份当前配置。
+3. **配置验证**：切换后工具会自动验证新配置是否生效。
+4. **错误处理**：如果目标环境不可用，系统会保持当前配置不变。
+
+### 故障排除
+
+如果切换后服务不正常，请按以下步骤排查：
+
+1. 检查配置文件格式是否正确
+2. 验证目标环境网络连通性
+3. 确认 Consul 服务状态
+4. 检查 TTS 服务是否健康
+
+使用诊断工具可以快速定位问题：
+
+```bash
+node test/consulDiagnostic.mjs
+```

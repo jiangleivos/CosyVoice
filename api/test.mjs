@@ -2,8 +2,8 @@ import fetch from 'node-fetch';
 import { log, time, timeLog, timeEnd } from 'console';
 import fs from 'fs';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let url = 'http://192.168.1.116:3100/api/tts';
-// let url = 'http://localhost:3100/api/tts';
+// let url = 'http://192.168.1.116:3100/api/tts';
+let url = 'http://localhost:3100/api/tts';
 // let text =
 // '需要您现在马上处理一下这笔欠款。感谢您的配合。如果已经对公还款，|3|请致电客服确保⼊账成功，我稍后也会在后台核实您的还款状态。如果没有准时到帐，我会再次联系您的,再见！';
 let text =

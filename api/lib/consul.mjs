@@ -1,14 +1,25 @@
 import { log } from 'console';
 import { isStringObject } from 'util/types';
+import { getConsulUrl } from './config.mjs';
 export default class Consul {
   static status = {
     pass: 'pass',
     warn: 'warn',
     fail: 'fail',
   };
-  constructor(url = 'http://192.168.1.88') {
+  constructor(url = null) {
     this.url = url;
     this.port = 8500;
+    // 如果没有传入URL，将在初始化时动态加载
+    if (!this.url) {
+      this._initUrl();
+    }
+  }
+
+  async _initUrl() {
+    if (!this.url) {
+      this.url = await getConsulUrl();
+    }
   }
 
   /**
@@ -17,6 +28,7 @@ export default class Consul {
    */
   async getChecks(filter = {}) {
     const fn = 'getChecks->';
+    await this._initUrl(); // 确保 URL 已初始化
     // http://192.168.1.88:8500/v1/agent/checks?filter=ServiceID%3D%3D%22cosy-cp4-service-1%22
     try {
       const url = `${this.url}:${this.port}/v1/agent/checks?`;
@@ -53,6 +65,7 @@ export default class Consul {
   // 发现服务
   async discoverService(serviceName) {
     const fn = 'discoverService->';
+    await this._initUrl(); // 确保 URL 已初始化
     const url = `${this.url}:${this.port}/v1/catalog/service/${serviceName}`;
     try {
       const response = await fetch(url);
@@ -68,6 +81,7 @@ export default class Consul {
   }
   async getHealthyService(serviceName, passing = true) {
     const fn = 'getHealthyService->';
+    await this._initUrl(); // 确保 URL 已初始化
     const url = `${this.url}:${this.port}/v1/health/service/${serviceName}${passing ? '?passing' : ''}`;
     this.serviceMap = {};
     try {
