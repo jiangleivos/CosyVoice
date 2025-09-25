@@ -1,6 +1,7 @@
 // api/lib/TTS.mjs
 import fs from 'fs';
 import fetch from 'node-fetch'; // 使用 node-fetch 代替 axios
+import net from 'net';
 import { log } from 'console';
 import { execFile, execFileSync, execSync } from 'child_process';
 // import { WaveFile } from 'wavefile'; // 引入 wavefile 库
@@ -235,6 +236,30 @@ class TTSClient {
     this.portQueue = [...ports]; // 初始化端口队列
     // 注意：这里不再使用常量，而是在方法中动态加载配置
   }
+
+  async checkServiceReachable(host, port, timeout = 3000) {
+    return new Promise((resolve, reject) => {
+      const socket = new net.Socket();
+      const onError = (err) => {
+        clearTimeout(timer);
+        socket.destroy();
+        reject(err);
+      };
+
+      const timer = setTimeout(() => {
+        socket.destroy();
+        reject(new Error('TCP connect timeout'));
+      }, timeout);
+
+      socket.once('error', onError);
+      socket.connect(port, host, () => {
+        clearTimeout(timer);
+        socket.removeListener('error', onError);
+        socket.end();
+        resolve(true);
+      });
+    });
+  }
   async getAvailableServices() {
     const fn = 'getAvailableServices->';
     try {
@@ -255,10 +280,18 @@ class TTSClient {
     const fn = 'generateAudioParallel->';
     let nodes = await this.getAvailableServices();
     let services = nodes.map((node) => node.Service);
+    const failureReasons = [];
     for (let service of services) {
       let { Address: addr, Port: port, Meta: meta, ID: id } = service;
       log(fn, 'addr', addr, 'port', port, 'meta', meta, 'id', [id], 'length', services.length);
       if (meta.status !== 'ready') continue;
+      try {
+        await this.checkServiceReachable(addr, port);
+      } catch (error) {
+        console.error(`${fn} 服务 ${id} (${addr}:${port}) TCP 检测失败: ${error.message}`);
+        failureReasons.push(`${id}@${addr}:${port} -> ${error.message}`);
+        continue;
+      }
       // log(fn, '准备添加到任务队列', service);
       this.taskQueue.push({
         addr,
@@ -305,6 +338,7 @@ class TTSClient {
         // return true;
       } catch (error) {
         console.error(`Port ${port} failed: ${error.message}`);
+        failureReasons.push(`${id}@${addr}:${port} -> ${error.message}`);
         // this.taskQueue.push({ addr, port });
         // this.portQueue.push(port);
         return null;
@@ -314,7 +348,8 @@ class TTSClient {
         // this.portQueue.push(port);
       }
     } else {
-      throw new Error('所有TTS服务暂时没有多余并发');
+      const detail = failureReasons.length ? `: ${failureReasons.join(' ; ')}` : '';
+      throw new Error(`所有TTS服务暂时没有多余并发${detail}`);
     }
   }
   // 修改后的 generateAudio 方法 - 使用Consul服务发现
@@ -328,6 +363,8 @@ class TTSClient {
     }
 
     // 尝试每个可用的服务
+    const failureReasons = [];
+
     for (let node of nodes) {
       let { Address: addr, Port: port, Meta: meta, ID: id } = node.Service;
 
@@ -348,6 +385,7 @@ class TTSClient {
       log(fn, 'fullUrl', fullUrl);
 
       try {
+        await this.checkServiceReachable(addr, port);
         // 使用 fetch 发送请求
         const response = await fetch(fullUrl, {
           method: 'GET',
@@ -367,12 +405,14 @@ class TTSClient {
         return buf;
       } catch (error) {
         console.error(`服务 ${id} (${addr}:${port}) 失败: ${error.message}`);
+        failureReasons.push(`${id}@${addr}:${port} -> ${error.message}`);
         // 继续尝试下一个服务
         continue;
       }
     }
 
-    throw new Error('所有TTS服务均不可用');
+    const detail = failureReasons.length ? `: ${failureReasons.join(' ; ')}` : '';
+    throw new Error(`所有TTS服务均不可用${detail}`);
   }
 }
 
