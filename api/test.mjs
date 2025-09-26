@@ -2,8 +2,8 @@ import fetch from 'node-fetch';
 import { log, time, timeLog, timeEnd } from 'console';
 import fs from 'fs';
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-// let url = 'http://192.168.1.116:3100/api/tts';
-let url = 'http://localhost:3100/api/tts';
+let url = 'http://192.168.1.116:3100/api/tts';
+// let url = 'http://localhost:3100/api/tts';
 // let text =
 // '需要您现在马上处理一下这笔欠款。感谢您的配合。如果已经对公还款，|3|请致电客服确保⼊账成功，我稍后也会在后台核实您的还款状态。如果没有准时到帐，我会再次联系您的,再见！';
 let text =
@@ -12,7 +12,7 @@ text =
   '诶 您好。|2|哎您好，打扰到您了，上次联系您的时候您的电话显示正忙哈，是这样子的，您的医社保之外做补充报销的资格是快要到期了，那您这边没有激活的话，以后生病住院责任内是没有办法申请报销的哈，您先不要挂电话，我再带您确认一下好吧?';
 // '喂你好|2|您好，迟女士，我这边是微博借钱的，之前联系过您，您的逾期欠款到目前为止怎么还没有处理呢？';
 text =
-  '欸，您好，我是树成的电话销售李师师，嗯来电就是提醒您投宝领取一份医疗补充金,稍后说了短信之后呢直接确认免费领取就可以了。';
+  '诶，您好，打扰到您了，上次联系您的时候，您的电话显示正忙哈，额是这样子的，您的医社保之外做补充报销的资格是快要到期了，那您这边没有激活的话，以后生病住院责任内是没有办法申请报销的哈，您先不要挂电话，我再带您确认一下，好吧? 嗯，如果没有特殊要求的话，以后我就用这个声音打电话您听一下是否可以哈？';
 
 let template = [
   '您好，迟女士，我这边是微博借钱的，之前联系过您，您的逾期欠款到目前为止怎么还没有处理呢？',
@@ -166,6 +166,7 @@ const main = async () => {
         let prompt = 'jiuge_nv_16k_02';
         prompt = 'yuanlv_nv_16k';
         prompt = 'yizhi_bx_nv';
+        prompt = 'yuanlv_taikang_nv';
         let qs = new URLSearchParams({ text, prompt });
         let res = await fetch(url + '?' + qs.toString(), {
           method: 'GET',
